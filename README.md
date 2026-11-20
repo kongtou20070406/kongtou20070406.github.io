@@ -2,18 +2,32 @@
 
 [访问网站](https://kongtou20070406.github.io/)
 
-GitHub Pages 从 `main` 分支的根目录部署。编辑对应文件并提交到 `main` 即可更新网站。
+GitHub Pages 从 `main` 分支的根目录部署。纯 HTML、CSS 和一个 JavaScript 模块，没有构建步骤；编辑后提交到 `main` 即可更新。
 
-- `index.html` 保存个人简介、项目和链接。
-- `styles.css` 控制布局、字体和配色。
-- `assets/` 存放封面、站点图标和字体。
+- `index.html`：全部文字内容（简介、研究、项目、做法）。
+- `styles.css`：排版与配色。亮色和暗色两套配色都定义在 `:root`，跟随系统设置切换。
+- `recurrence.mjs`：首屏的图 1，同步邻域递推的实时演示。
+- `assets/`：标题字体子集、图标、分享图和字体许可证。
+- `tools/build_assets.py`：生成 `assets/` 里的字体子集、图标和分享图。
 
 本地预览时，在仓库目录运行 `python -m http.server 8000`，然后打开 `http://localhost:8000`。
 
-## 黑洞与光路
+## 图 1：同步邻域递推
 
-封面和交互光路使用同一个 Schwarzschild 零测地线积分器 `light-rays.mjs`。取长度单位 `r_g = GM/c²`，在固定半径 `60 r_g` 处从观察者反向发射光线。由 `u = r_g/r` 和初始碰撞参数积分 `u″ = 3u² − u`，直到光线到达事件视界或逃向无穷远。光路图使用 `(r, φ)` 坐标绘制轨迹。
+图 1 在浏览器里实时迭代一个标量递推
 
-封面用 78° 倾角和从 `6 r_g` 延伸到 `34 r_g` 的理想化薄吸积盘。图像计算了引力偏折、引力红移和圆轨道物质的多普勒增亮。盘的发光纹理、色调及背景星场为示意模型。参考 [Gralla、Holz 和 Wald 的光线弯曲推导](https://arxiv.org/html/1906.00873#S2)和 [Luminet 的薄盘成像](https://articles.adsabs.harvard.edu/pdf/1979A%26A....75..228L)。
+```
+x_{t+1} = λ · Ā x_t + b,   x_0 = b,   λ = 0.95
+```
 
-重新计算时可以运行 `node tools/render-black-hole.mjs black-hole.ppm`，再将生成的 PPM 图像转换为 `assets/black-hole.jpg`。
+`Ā` 把每个格子和它上下左右四个邻居取平均（网格外按 0 计），`b` 在源点处为 1。`Ā` 非负且每行和不超过 1，所以 `‖x_{t+1} − x_t‖∞ ≤ λ‖x_t − x_{t−1}‖∞`：这一步是收缩映射，迭代收敛到唯一不动点 `(I − λĀ)⁻¹ b`。信息每轮走一格，第 `T` 轮时非零的格子恰好是离源点曼哈顿距离不超过 `T` 的格子。圆点大小按对数刻度覆盖 6 个数量级。`λ = 0.95` 取自 NSI 的增益上界；这是简化的标量版本，不是 NSI 本身。
+
+## 改了标题文字之后
+
+标题、印章和引语用 Noto Serif SC 的子集（约 110 KiB，只含页面用到的字）。改动这些位置的文字后，重新生成子集，否则新字会退回系统字体：
+
+```
+python tools/build_assets.py --font C:/Windows/Fonts/NotoSerifSC-VF.ttf
+```
+
+脚本需要 fontTools、brotli、Pillow 和 numpy，会同时重画 `seal.svg`、`seal-180.png` 和 `og.png`。Noto Serif SC 以 SIL Open Font License 1.1 发布，许可证见 `assets/NotoSerifSC-OFL.txt`。

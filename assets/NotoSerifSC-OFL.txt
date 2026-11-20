@@ -1,4 +1,5 @@
-Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage)
+Copyright 2017-2023 Adobe (http://www.adobe.com/). Noto Serif SC, https://github.com/notofonts/noto-cjk
+assets/serif-subset.woff2 is a subset of Noto Serif SC built by tools/build_assets.py.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
