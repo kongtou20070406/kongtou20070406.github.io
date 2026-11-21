@@ -453,8 +453,12 @@ export function createGlass(canvas, options = {}) {
             sillCol *= 1.0 - 0.5 * a * (1.0 - rq.y);
           }
           // contact shadow: tight under the body, soft around it, longer towards the room
-          vec2 sc = vec2((g.x - cx) / (uCatRect.z * 0.38), (g.y - uCatBase - top * 0.08) / (top * 0.3));
-          float shadow = smoothstep(1.3, 0.15, length(sc)) * 0.6 + smoothstep(0.55, 0.0, length(sc * vec2(1.0, 1.6))) * 0.3;
+          // contact shadow from the cat's own outline: wherever the cat sits just above, the stone is dark
+          vec2 catUv = vec2((g.x - uCatRect.x) / uCatRect.z, (uCatRect.y - g.y) / uCatRect.w);
+          float under1 = textureLod(uCat, vec2(catUv.x, catUv.y + 0.035), 2.5).a;
+          float under2 = textureLod(uCat, vec2(catUv.x, catUv.y + 0.11), 4.0).a;
+          float inside = step(0.0, catUv.x) * step(catUv.x, 1.0);
+          float shadow = clamp(under1 * 0.8 + under2 * 0.45, 0.0, 0.9) * inside;
           // the window is behind the cat, so its shadow falls forward, towards the room,
           // widening and softening as it goes
           float ahead = max(g.y - uCatBase, 0.0) / top;
@@ -490,11 +494,11 @@ export function createGlass(canvas, options = {}) {
         catCol *= mix(0.6, 1.0, smoothstep(0.0, 0.32, cq.y));                       // the sill's shadow
         float wrap = clamp((1.0 - near) * 2.4, 0.0, 1.0);
         float halo = clamp((1.0 - far) * 1.4, 0.0, 1.0);
-        float upward = 0.32 + 0.95 * smoothstep(0.3, 0.95, cq.y);                   // ears and head catch most
+        float upward = smoothstep(0.18, 0.45, cq.y) * (0.45 + 0.85 * smoothstep(0.45, 0.95, cq.y)); // none where it sits, most on the ears
         catCol += windowLight * (wrap * 0.95 + halo * 0.22) * upward * (0.6 + 0.4 * lum);
         col = mix(col, catCol, cat.a);
         // the window spills a little over the silhouette's edge
-        col += windowLight * 0.07 * cat.a * halo;
+        col += windowLight * 0.07 * cat.a * halo * smoothstep(0.2, 0.5, cq.y);
       }
     }
 
@@ -935,6 +939,7 @@ export function createGlass(canvas, options = {}) {
       }
       const next = writer.stroke.points[writer.index + 1];
       if (!next) {
+        releaseCarry();
         writer.stroke = null;
         continue;
       }
@@ -981,13 +986,20 @@ export function createGlass(canvas, options = {}) {
         drops.splice(i, 1);
       }
     }
-    // Broad wet patches supply clusters of satellites separated by nearly bare stretches.
+    // The finger gathers the condensation it wipes (and any drops it runs into) and carries it
+    // along; the water pools where the finger lifts. Only a little leaks to the stroke's edge on
+    // the way, mostly on the lower side.
+    carry.volume += length * radius * radius * 0.009 + swept;
+    carry.x = bx;
+    carry.y = by;
+    carry.radius = radius;
+    swept = 0;
     const patch = noise1((ax + bx) * 18 + (ay + by) * 27);
-    let supply = length * (9 + 145 * patch ** 2.6) + random();
-    if (swept > 1e-9) supply = Math.max(1, supply);
+    let supply = length * (3 + 34 * patch ** 2.6) + random() * 0.6;
+    const lowerSide = ny >= 0 ? 1 : -1;
     while (supply >= 1) {
       supply--;
-      const t = random(), side = random() < 0.5 + 0.28 * ny ? 1 : -1;
+      const t = random(), side = random() < 0.82 ? lowerSide : -lowerSide;
       const lower = ny * side;
       const size = (0.041 + (0.24 + 0.080 * patch) * random() ** 4.1) * (0.88 + 0.24 * lower);
       const r = Math.cbrt((radius * size) ** 3 + swept * 0.85);
@@ -1001,6 +1013,19 @@ export function createGlass(canvas, options = {}) {
         addDrop(x + offset * Math.cos(phi), y + offset * Math.sin(phi), r * (0.16 + random() * 0.18));
       }
     }
+  }
+
+  // water the finger is carrying; released as one pooled drop where the stroke ends
+  const carry = { volume: 0, x: 0, y: 0, radius: 0.014 };
+  function releaseCarry() {
+    if (carry.volume <= 0) return;
+    const r = Math.min(Math.cbrt(carry.volume), carry.radius * 0.75);
+    if (r > 0.0012) {
+      const d = addDrop(carry.x + (random() - 0.5) * carry.radius * 0.3, carry.y + carry.radius * 0.55, r);
+      // it sits a moment, gathering, before it decides to run
+      if (d) d.stall = 0.4 + random() * 1.4;
+    }
+    carry.volume = 0;
   }
 
   function distanceToSegment(px, py, ax, ay, bx, by) {
@@ -1053,7 +1078,7 @@ export function createGlass(canvas, options = {}) {
   function stepDrops(dt) {
     const baseCritical = view.aspect < 0.9 ? 0.0066 : 0.0058;
     // the glass keeps collecting beads of condensation, more towards the bottom
-    condensationClock += dt * (drops.length < MAX_DROPS * 0.76 ? 2.8 * view.aspect : 0.3);
+    condensationClock += 0; // beads no longer pop out of the fog on their own
     while (condensationClock > 1) {
       condensationClock -= 1;
       const y = layout.frame + (layout.sill - layout.frame) * random() ** 0.8;
@@ -1193,6 +1218,7 @@ export function createGlass(canvas, options = {}) {
   });
 
   const lift = () => {
+    if (pointer.down) releaseCarry();
     pointer.down = false;
     breathHeld = false;
     clearTimeout(pointer.pressTimer);
@@ -1243,8 +1269,9 @@ export function createGlass(canvas, options = {}) {
     for (let k = 0; k < 3; k++)
       for (let i = 0; i < 40; i++) {
         const t = i / 40, t2 = (i + 1) / 40, y = 0.3 + k * 0.09;
-        wipe(a * 0.08 + t * a * 0.55, y, a * 0.08 + t2 * a * 0.55, y + 0.006, 0.021, 1, true);
+        wipe(a * 0.08 + t * a * 0.55, y, a * 0.08 + t2 * a * 0.55, y + 0.006, fingerRadius(), 1, true);
       }
+      releaseCarry();
   }
 
   function stepSchedule() {
