@@ -1,191 +1,41 @@
 <!doctype html>
-<html lang="zh-CN" id="top">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f5f2ea" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#131210" media="(prefers-color-scheme: dark)">
-  <title>空投 Kongtou</title>
-  <meta name="description" content="空投（Kongtou）的个人主页。研究循环计算：同一个小算子反复作用在自己的输出上，能积累出什么。">
-  <link rel="canonical" href="https://kongtou20070406.github.io/">
-  <meta property="og:type" content="website">
-  <meta property="og:locale" content="zh_CN">
-  <meta property="og:title" content="空投 Kongtou">
-  <meta property="og:description" content="研究循环计算：同一个小算子反复作用，能不能一轮比一轮想得更深。">
-  <meta property="og:url" content="https://kongtou20070406.github.io/">
-  <meta property="og:image" content="https://kongtou20070406.github.io/assets/og.png">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="朱红印章“空投”，旁边是一张圆点网格，信号从一个源点按菱形逐格传开">
-  <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="assets/seal.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="assets/seal-180.png">
-  <link rel="preload" href="assets/serif-subset.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css">
-  <script type="module" src="recurrence.mjs"></script>
-</head>
-<body>
-  <a class="skip-link" href="#main">跳到正文</a>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#070b14" />
+    <title>kongtou</title>
+    <meta name="description" content="kongtou — a fogged window at blue hour." />
+    <meta property="og:title" content="kongtou" />
+    <meta property="og:description" content="kongtou — a fogged window at blue hour." />
+    <meta property="og:image" content="assets/og.jpg" />
+    <link rel="icon" href="assets/favicon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="main.mjs"></script>
+  </head>
+  <body>
+    <header class="hero" id="top">
+      <canvas id="glass" aria-label="A fogged window at blue hour. Draw on the glass; hold to breathe on it."></canvas>
+      <h1 class="sr">kongtou</h1>
+      <a class="gh" href="https://github.com/kongtou20070406">github ↗</a>
+      <div class="sill"><a class="down" href="#notes">notes <span aria-hidden="true">↓</span></a></div>
+    </header>
 
-  <header class="site-header wrap">
-    <a class="brand" href="#top" aria-label="空投，回到顶部">
-      <span class="seal" aria-hidden="true"><span>空</span><span>投</span></span>
-      <span class="brand-name">空投 <span lang="en">Kongtou</span></span>
-    </a>
-    <nav class="nav" aria-label="主导航">
-      <a href="#research">研究</a>
-      <a href="#projects">项目</a>
-      <a href="#method">做法</a>
-      <a href="https://github.com/kongtou20070406" class="nav-external">GitHub<span aria-hidden="true">↗</span></a>
-    </nav>
-  </header>
-
-  <main id="main" tabindex="-1">
-    <section class="hero wrap" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="eyebrow">机器学习研究 · 本科在读</p>
-        <h1 id="hero-title">一轮比一轮<br>想得更深</h1>
-        <p class="lead">我是空投（<span lang="en">Kongtou</span>）。我研究循环计算：同一个小算子反复作用在自己的输出上，能积累出什么。</p>
-        <p class="hero-text">在图像里，它是每个位置只和邻居交换状态、一步步传开的递推；在推理里，它是同一个小模型用同一套权重多想几轮。我想知道，深度能不能来自迭代，而不是来自参数。</p>
-        <p class="hero-links">
-          <a class="link-primary" href="#research">看研究<span aria-hidden="true">→</span></a>
-          <a class="link-quiet" href="https://github.com/kongtou20070406">GitHub<span aria-hidden="true">↗</span></a>
-        </p>
-      </div>
-
-      <figure class="demo" aria-labelledby="demo-title">
-        <div class="demo-head">
-          <p class="demo-title" id="demo-title"><span class="fig-no">图 1</span>同步邻域递推</p>
-          <div class="demo-buttons" id="demo-buttons" hidden>
-            <button type="button" id="demo-play">暂停</button>
-            <button type="button" id="demo-shuffle">换源点</button>
-          </div>
-        </div>
-        <div class="demo-stage">
-          <canvas id="demo-canvas" role="img" aria-label="一张圆点网格。朱红方块是源点，信号每一轮向上下左右传开一格，形成逐渐扩大的菱形，最后停在一个不动点。" aria-describedby="demo-caption"></canvas>
-          <noscript><p class="demo-noscript">这张图在浏览器里实时计算，需要启用 JavaScript。</p></noscript>
-        </div>
-        <div class="demo-rail" aria-hidden="true">
-          <div class="rail-track"><div class="rail-fill" id="rail-fill"></div></div>
-          <ol class="rail-ticks">
-            <li data-t="1">1</li><li data-t="2">2</li><li data-t="4">4</li><li data-t="8">8</li><li data-t="16">16</li><li data-t="32">32</li><li data-t="64">64</li>
-          </ol>
-        </div>
-        <p class="demo-readout" id="demo-readout" aria-live="off">
-          <span>第 <b id="readout-t">0</b> 轮</span>
-          <span>本轮新到达 <b id="readout-new">0</b> 格</span>
-          <span>相邻两轮最大差 <b id="readout-res">—</b></span>
-        </p>
-        <figcaption id="demo-caption">
-          <p class="formula"><i>x</i><sub><i>t</i>+1</sub> = <i>λ</i> · <i>Ā</i> <i>x</i><sub><i>t</i></sub> + <i>b</i>，<i>λ</i> = 0.95</p>
-          <p><i>Ā</i> 把每个格子和它上下左右四个邻居取平均，<i>b</i> 是源点（朱红方块）注入的信号。信息每轮只走一格，第 <i>T</i> 轮的朱红圆点是刚到达的格子。<i>λ</i> 小于 1，相邻两轮的差距每轮至少缩到 0.95 倍，所以多跑多少轮都会停在同一个不动点。</p>
-          <p class="demo-note">点任意格子添加或移除源点。圆点大小按对数刻度。这是一个简化的标量版本，不是 NSI 本身。</p>
-        </figcaption>
-      </figure>
-    </section>
-
-    <section class="section wrap" id="research" aria-labelledby="research-title">
-      <header class="section-head">
-        <p class="section-no">§1</p>
-        <h2 id="research-title">研究</h2>
+    <main class="notes" id="notes">
+      <header class="notes-head">
+        <h2>notes</h2>
+        <figure class="epigraph">
+          <blockquote lang="en">We live in a twilight world, and there are no friends at dusk.</blockquote>
+          <figcaption lang="en">— Tenet</figcaption>
+        </figure>
       </header>
-      <p class="section-intro">我的工作都围绕一个问题：一个很小的算子反复作用，能不能把计算一层层累积起来，而不是在同一个答案附近来回修补。</p>
+      <ol class="posts" id="posts"></ol>
+      <article class="post" id="post" hidden></article>
+    </main>
 
-      <div class="research-grid">
-        <article class="research-item">
-          <p class="item-tag">空间上的递推 <span class="status status-public">已公开</span></p>
-          <h3>邻域状态交互 <span lang="en">NSI</span></h3>
-          <p>很多视觉状态空间模型把二维图像拉成一维扫描路径来传播状态，相邻位置的交互因此变得间接，还依赖扫描顺序。NSI 换成同步的二维邻域递推：每个位置每一步只和 3×3 邻域交换状态，所有位置同时更新。转移的增益上界设为 0.95，整个递推因此是收缩的。</p>
-          <dl class="facts">
-            <div><dt>证明</dt><dd>收缩性和与步数无关的状态界，用 Lean 4 写成 19 个证明文件、203 条定理</dd></div>
-            <div><dt>任务</dt><dd>图像去模糊（GoPro）与去雾（O-HAZE、Haze4K）</dd></div>
-          </dl>
-          <a class="item-link" href="https://github.com/kongtou20070406/Beyond-Sequential-Scanning">代码与证明<span aria-hidden="true">↗</span></a>
-        </article>
-
-        <article class="research-item">
-          <p class="item-tag">推理轮次上的循环 <span class="status status-wip">进行中</span></p>
-          <h3>循环推理内核</h3>
-          <p>一个很小、权重共享的循环网络：每一轮用同一条规则，状态里不藏轮数。我希望它多跑几轮能把错的改对，停下来的地方正好是与题目示例一致的答案，而且跑多少轮都不崩。第一个试验场是 ARC 式的网格推理题。</p>
-          <dl class="facts">
-            <div><dt>约束</dt><dd>不超过 700 万参数；测试时不改权重，不给模型题号或轮号</dd></div>
-            <div><dt>状态</dt><dd>还没有公开的代码和结果</dd></div>
-          </dl>
-        </article>
-      </div>
-
-      <blockquote class="stance">
-        <p>算力免费，我也选循环。</p>
-        <footer>压力来自权重的重复使用，而不是省钱。这个立场可以被推翻：如果有人用一个很小的模型，只做一次前向、不经过任何循环就做到了同样的推理，这条路就错了。</footer>
-      </blockquote>
-    </section>
-
-    <section class="section wrap" id="projects" aria-labelledby="projects-title">
-      <header class="section-head">
-        <p class="section-no">§2</p>
-        <h2 id="projects-title">公开项目</h2>
-      </header>
-      <ul class="project-list">
-        <li>
-          <a class="project" href="https://github.com/kongtou20070406/research-direction-selector">
-            <span class="project-name" lang="en">Research Direction Selector</span>
-            <span class="project-desc">把研究目标、实验预算、执行记录和验证证据留在同一个工作流里，配合 Codex、Claude Code 与 Lean 使用。</span>
-            <span class="project-meta" lang="en">Python</span>
-            <span class="project-arrow" aria-hidden="true">↗</span>
-          </a>
-        </li>
-        <li>
-          <a class="project" href="https://github.com/kongtou20070406/Beyond-Sequential-Scanning">
-            <span class="project-name" lang="en">Beyond Sequential Scanning</span>
-            <span class="project-desc">NSI 的 PyTorch 实现、实验记录和 Lean 4 形式化证明，附公式与代码的逐条对应表。</span>
-            <span class="project-meta" lang="en">Python · Lean 4</span>
-            <span class="project-arrow" aria-hidden="true">↗</span>
-          </a>
-        </li>
-        <li>
-          <a class="project" href="https://github.com/kongtou20070406/magpie-obelisk-usage">
-            <span class="project-name" lang="en">Obelisk Usage</span>
-            <span class="project-desc">magpie 侧栏插件：统计编程代理调用 obelisk 的次数，可按日期、代理和调用类型查看，数据只在本地计算。</span>
-            <span class="project-meta" lang="en">JavaScript</span>
-            <span class="project-arrow" aria-hidden="true">↗</span>
-          </a>
-        </li>
-      </ul>
-    </section>
-
-    <section class="section wrap" id="method" aria-labelledby="method-title">
-      <header class="section-head">
-        <p class="section-no">§3</p>
-        <h2 id="method-title">我怎么做研究</h2>
-      </header>
-      <ol class="method-list">
-        <li>
-          <h3>先证弱命题</h3>
-          <p>目标太大时，先拿下它的弱化版本。每一条单独成立，证出来就成为后面的引理。就像证明黎曼猜想之前，先证明临界线上有正比例的零点。</p>
-        </li>
-        <li>
-          <h3>数字带分母</h3>
-          <p>写“200 道题里多跑几轮改对 12 道、改错 3 道”，不写“显著提升”。没测过的写“预期”。</p>
-        </li>
-        <li>
-          <h3>能证明的交给证明器</h3>
-          <p>稳定性这类性质写成 Lean 4 证明，由机器检查，而不是靠我读一遍觉得对。</p>
-        </li>
-        <li>
-          <h3>代理分工，我管方向</h3>
-          <p>实现、复查和文献调研交给多个 AI 代理，每轮实验留下能追溯的执行记录。我负责提问题和判读结果。</p>
-        </li>
-      </ol>
-    </section>
-  </main>
-
-  <footer class="site-footer wrap">
-    <p><span class="footer-name">空投 <span lang="en">Kongtou</span></span> · 2026</p>
-    <p class="footer-links">
-      <a href="https://github.com/kongtou20070406">GitHub<span aria-hidden="true">↗</span></a>
-      <a href="#top">回到顶部<span aria-hidden="true">↑</span></a>
-    </p>
-  </footer>
-</body>
+    <footer class="foot">
+      <p class="foot-line" id="foot-line"></p>
+      <a href="https://github.com/kongtou20070406">github ↗</a>
+    </footer>
+  </body>
 </html>

@@ -1,33 +1,15 @@
-# 空投 Kongtou 的个人网站
+# kongtou
 
-[访问网站](https://kongtou20070406.github.io/)
+[kongtou20070406.github.io](https://kongtou20070406.github.io/)
 
-GitHub Pages 从 `main` 分支的根目录部署。纯 HTML、CSS 和一个 JavaScript 模块，没有构建步骤；编辑后提交到 `main` 即可更新。
+一扇蓝调时刻起雾的窗。手指在雾上写下 `kongtou`，雾慢慢回来盖住它，下一次重写的笔迹会不一样；按住画面或按空格是哈气，以前写过的字会从雾里浮出来。窗台上的猫背对着你看雪，它的脸在玻璃的反光里。天色跟着访客本地的时间变。往下是 notes。
 
-- `index.html`：全部文字内容（简介、研究、项目、做法）。
-- `styles.css`：排版与配色。亮色和暗色两套配色都定义在 `:root`，跟随系统设置切换。
-- `recurrence.mjs`：首屏的图 1，同步邻域递推的实时演示。
-- `assets/`：标题字体子集、图标、分享图和字体许可证。
-- `tools/build_assets.py`：生成 `assets/` 里的字体子集、图标和分享图。
+纯静态页面，无构建步骤：
 
-本地预览时，在仓库目录运行 `python -m http.server 8000`，然后打开 `http://localhost:8000`。
+- `glass.mjs`：WebGL2 渲染。窗外照片加实时落雪和星空；雾的模拟（密度与手指留下的油迹）；水的模拟（凝结、合并、下滑、尾迹）与按水滴高度场计算的折射、反射和高光；玻璃里映出的房间（显示器上的循环和 loss 曲线、按访客时间倒着走的钟）；窗台与猫。
+- `notes.mjs`：博客。文章是 `posts/` 里的 Markdown 文件，在 `posts/index.json` 里登记；越早的文章越模糊。
+- `assets/`：窗外画面、房间、猫（油画）、字体子集（Noto Serif SC，SIL OFL 1.1，见 `assets/NotoSerifSC-OFL.txt`）。
 
-## 图 1：同步邻域递推
+调试开关：`?hour=23` 预览某个时刻；`?demo` 自动擦几道；`?water` 把水涂成红色。
 
-图 1 在浏览器里实时迭代一个标量递推
-
-```
-x_{t+1} = λ · Ā x_t + b,   x_0 = b,   λ = 0.95
-```
-
-`Ā` 把每个格子和它上下左右四个邻居取平均（网格外按 0 计），`b` 在源点处为 1。`Ā` 非负且每行和不超过 1，所以 `‖x_{t+1} − x_t‖∞ ≤ λ‖x_t − x_{t−1}‖∞`：这一步是收缩映射，迭代收敛到唯一不动点 `(I − λĀ)⁻¹ b`。信息每轮走一格，第 `T` 轮时非零的格子恰好是离源点曼哈顿距离不超过 `T` 的格子。圆点大小按对数刻度覆盖 6 个数量级。`λ = 0.95` 取自 NSI 的增益上界；这是简化的标量版本，不是 NSI 本身。
-
-## 改了标题文字之后
-
-标题、印章和引语用 Noto Serif SC 的子集（约 110 KiB，只含页面用到的字）。改动这些位置的文字后，重新生成子集，否则新字会退回系统字体：
-
-```
-python tools/build_assets.py --font C:/Windows/Fonts/NotoSerifSC-VF.ttf
-```
-
-脚本需要 fontTools、brotli、Pillow 和 numpy，会同时重画 `seal.svg`、`seal-180.png` 和 `og.png`。Noto Serif SC 以 SIL Open Font License 1.1 发布，许可证见 `assets/NotoSerifSC-OFL.txt`。
+本地预览：`python -m http.server 8000`，打开 `http://localhost:8000`。
