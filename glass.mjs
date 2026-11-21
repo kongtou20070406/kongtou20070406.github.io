@@ -5,7 +5,6 @@
 const DEBUG_SHOT = typeof location !== "undefined" && location.search.includes("shot");
 const MAX_SEGMENTS = 96;
 const MAX_DROPS = 700;
-const WATER_THRESHOLD = 0.42; // weight at the contact line
 
 // Where things sit inside the room photo (fractions of its width and height, y down).
 // Filled in from the generated room image; the screen and the clock are drawn live on top.
@@ -199,55 +198,69 @@ export function createGlass(canvas, options = {}) {
     outColor = vec4(clamp(fog, 0.0, 1.0), clamp(trace, 0.0, 1.0), bank, 1.0);
   }`;
 
-  // Weighted cap samples: footprint, contact radius, and encoded outward slope (glass axes).
+  // Each atlas cell is a two-unit square. Pin the sliding head at the particle
+  // position so stretching the upper part doesn't drag the head off its trail.
   const WATER_VERTEX = `#version 300 es
   layout(location = 0) in vec2 aCorner;
-  layout(location = 1) in vec4 aDrop;   // x, y, radius, alpha
-  layout(location = 2) in vec3 aShape;  // stretch, seed, lateral drift
-  uniform float uAspect;
-  out vec2 vLocal;
-  out vec3 vShape;
-  out float vAlpha, vRadius;
+  layout(location = 1) in vec4 aDrop;
+  layout(location = 2) in vec3 aShape; // stretch, stable seed, drift
+  uniform float uAspect, uGlassHeight;
+  out vec2 vAtlas, vGlass;
+  flat out float vFade, vRadius, vStretch;
   void main() {
-    vec2 local = aCorner * 1.65;
-    if (local.y < 0.0) local.y *= 1.0 + 1.4 * aShape.x;
-    local.x += aShape.z * min(local.y, 0.0);
-    vec2 g = aDrop.xy + local * aDrop.z;
-    vLocal = local;
-    vShape = aShape;
-    vAlpha = aDrop.w;
+    bool sliding = aShape.x > 0.12;
+    bool micro = aDrop.z * uGlassHeight < 1.5;
+    float tile = sliding ? 12.0 + floor(aShape.y * 6.0) :
+                 micro ? 18.0 + floor(aShape.y * 6.0) : floor(aShape.y * 12.0);
+    vAtlas = (vec2(mod(tile, 6.0), 3.0 - floor(tile / 6.0)) + 0.5 + aCorner * 0.5) / vec2(6,4);
+    vec2 local = aCorner;
+    vStretch = sliding ? 1.0 + 0.47 * aShape.x : 1.0;
+    if (sliding) {
+      local.y += 0.34;
+      local.y *= vStretch;
+      local.x -= aShape.z * max(local.y, 0.0);
+    }
+    vec2 pos = aDrop.xy + vec2(local.x, -local.y) * aDrop.z / (sliding ? 0.43 : 0.73);
+    vGlass = vec2(pos.x / uAspect, 1.0 - pos.y);
+    vFade = aDrop.w;
     vRadius = aDrop.z;
-    gl_Position = vec4(g.x / uAspect * 2.0 - 1.0, 1.0 - g.y * 2.0, 0.0, 1.0);
+    gl_Position = vec4(vGlass * 2.0 - 1.0, 0, 1);
   }`;
 
   const WATER_FRAGMENT = `#version 300 es
   precision highp float;
-  in vec2 vLocal;
-  in vec3 vShape;
-  in float vAlpha, vRadius;
+  uniform sampler2D uSurface, uLight, uScene, uRoom;
+  uniform float uAspect, uRoomAspect;
+  uniform vec2 uParallax;
+  uniform vec3 uSky;
+  in vec2 vAtlas, vGlass;
+  flat in float vFade, vRadius, vStretch;
   out vec4 outColor;
   ${NOISE}
   void main() {
-    vec2 q = vLocal;
-    q.x -= vShape.z * min(q.y, 0.0);
-    float tail = max(-q.y - 0.22, 0.0) / (1.0 + 1.4 * vShape.x);
-    q.y += tail * 1.4 * vShape.x;
-    q.x *= 1.0 + 1.15 * vShape.x * smoothstep(0.05, 0.78, tail);
-    // A tilted footprint and asymmetric sag curve the inverted roofline.
-    q.y += (vShape.y - 0.5) * 0.34 * q.x + 0.14 * q.x * q.x;
-    q.x /= 0.97 + 0.11 * q.y;
-    vec2 direction = q / max(length(q), 0.01);
-    float pin = vnoise(direction * 1.8 + vShape.y * 67.0);
-    q /= 0.93 + 0.15 * pin;
-    float r2 = dot(q, q);
-    float weight = clamp(1.42 - sqrt(r2), 0.0, 1.0) * vAlpha;
-    // For a footprint of unit radius, the sphere radius is 1/sin(contact angle).
-    float sphere = 1.0 / sin(mix(0.37, 0.68, vShape.y));
-    float level = sqrt(max(sphere * sphere - r2, 0.04));
-    float height = level - sqrt(sphere * sphere - 1.0);
-    vec2 slope = -vec2(dFdx(height) / dFdx(vLocal.x), dFdy(height) / dFdy(vLocal.y));
-    outColor = weight * vec4(1.0, min(vRadius * 32.0, 1.0), clamp(0.5 + 0.45 * slope, 0.0, 1.0));
-
+    vec4 cap = texture(uSurface, vAtlas);
+    vec3 baked = texture(uLight, vAtlas).rgb;
+    vec2 xy = (cap.rg - 0.5) * 2.0 / max(cap.a, 0.01);
+    xy.y /= vStretch;
+    vec3 n = vec3(xy, sqrt(max(0.01, 1.0 - dot(xy, xy))));
+    float height = cap.b / max(cap.a, 0.01);
+    // Let the mist show through the very thinnest part of the contact.
+    float coverAlpha = cap.a * vFade * mix(0.72, 1.0, smoothstep(0.0, 0.15, height));
+    vec2 axes = vec2(1.0/uAspect, 1);
+    vec2 ray = refract(vec3(0,0,-1), n, 1.0/1.333).xy;
+    vec2 lens = vGlass + ray * axes * (1.65 + 0.22 * height);
+    float lod = clamp(log2(0.031 / vRadius), 1.0, 5.5);
+    vec3 through = textureLod(uScene, clamp(lens,0.001,0.999), lod).rgb * 2.0;
+    vec2 mirror = vGlass + axes * n.xy * n.z * 0.95;
+    vec2 r = cover(vec2(1.0-mirror.x,mirror.y), uAspect, uRoomAspect, 1.08, -uParallax*0.02);
+    vec3 indoor = textureLod(uRoom,r,1.5).rgb;
+    float fresnel = 0.0204 + 0.9796 * pow(1.0-n.z,5.0);
+    vec3 drop = mix(through,indoor,fresnel);
+    // The outdoor plate is already display-referred. Combine fixed radiance
+    // in approximately linear light; the light plate includes receiver caustics.
+    vec3 radiance = baked*2.25 * (0.85 + 0.20*uSky.y - 0.24*uSky.x);
+    vec3 wet = sqrt(drop*drop + radiance);
+    outColor = vec4(wet*coverAlpha + radiance*(1.0-cap.a)*vFade, coverAlpha);
   }`;
 
   const COMPOSITE = `#version 300 es
@@ -340,7 +353,6 @@ export function createGlass(canvas, options = {}) {
     float trace = state.g;
 
     vec4 water = texture(uWater, vUv);
-    fog *= 1.0 - 0.78 * smoothstep(0.26, 0.44, water.r);
 
     // condensation is made of droplets a few pixels wide
     float cell = worley(gl_FragCoord.xy / 3.0);
@@ -367,16 +379,16 @@ export function createGlass(canvas, options = {}) {
     float gy = texture(uFog, vUv + vec2(0, ft.y)).r - texture(uFog, vUv - vec2(0, ft.y)).r;
     vec2 bankSlope = vec2(gx, gy);
     float bankLight = clamp(dot(bankSlope, vec2(-0.44, 0.9)) * 2.8 + 0.47, 0.0, 1.0);
-    col = mix(col, col * 0.65 + (milk * 0.94 + vec3(0.073, 0.085, 0.105)) * bankLight, state.b);
+    col = mix(col, col * 0.65 + (milk * 0.94 + vec3(0.073, 0.085, 0.105)) * bankLight, state.b * 0.54);
     col += clamp(length(vec2(gx, gy)) * 0.5, 0.0, 1.0) * (milk * 0.35 + 0.02);
 
     // the room in the glass: a clear mirror where wiped, a soft sheen with glints where fogged
     vec3 roomSharp = room(vUv, 0.4);
     vec3 roomSoft = room(vUv, 5.0);
     float roomBright = dot(room(vUv, 2.5), vec3(0.33));
-    vec3 reflection = mix(roomSharp * 0.2, roomSoft * 0.13 + pow(micro, 5.0) * roomBright * 1.6, density);
+    vec3 reflection = mix(roomSharp * 0.1, roomSoft * 0.065 + pow(micro, 5.0) * roomBright * 0.8, density);
     // the darker it is outside, the more of the room the glass shows
-    reflection *= 1.0 - 0.8 * uSky.x + 0.7 * uSky.y;
+    reflection *= 1.0 - 0.8 * uSky.x + 0.35 * uSky.y;
     col += reflection;
 
     // the cat sits facing the window, so the glass shows its face: mirrored, a little
@@ -388,59 +400,14 @@ export function createGlass(canvas, options = {}) {
       vec2 rq = vec2(0.5 - (g.x - rcx) / rw, (rby - g.y) / rh);
       if (rq.x > 0.0 && rq.x < 1.0 && rq.y > 0.0 && rq.y < 1.0 && g.y < uFrame.y) {
         vec4 face = textureLod(uCatFront, rq, density * 4.5);
-        float strength = mix(0.5, 0.06, density);
+        float strength = mix(0.26, 0.04, density);
         col += face.rgb * face.a * strength * vec3(0.82, 0.88, 1.0);
       }
     }
 
-    // water drops
-    float aa = clamp(fwidth(water.r) * 0.55, 0.025, 0.20);
-    float coverage = smoothstep(${WATER_THRESHOLD} - aa, ${WATER_THRESHOLD} + aa, water.r);
-    if (water.r > 0.14 && coverage < 1.0) {
-      // Light escaping the lower rim lands in the neighboring mist.
-      float facing = (water.a / water.r - 0.5) / 0.45;
-      float skirt = exp(-116.0 * pow(water.r - 0.34, 2.0)) * (1.0 - coverage);
-      float focus = smoothstep(0.02, 0.54, facing);
-      col += skirt * density * (focus * (glow * 0.52 + vec3(0.019, 0.025, 0.038)) - col * (1.0 - focus) * 0.12);
-    }
-    if (coverage > 0.0) {
-      vec3 material = water.gba / max(water.r, 0.001);
-      vec2 slope = (material.yz - 0.5) / 0.45;
-      vec3 n = normalize(vec3(slope, 1.0));
-      // Snell at the cap, followed by an effective propagation distance to the street.
-      const float eta = 1.0 / 1.333;
-      float cosT = sqrt(1.0 - eta * eta * (1.0 - n.z * n.z));
-      vec2 axes = vec2(aspect, -1.0);
-      vec2 ray = (eta * n.z - cosT) * n.xy;
-      float radiusPx = max(1.0, material.x * uRes.y / 32.0);
-      float lensLod = clamp(log2(float(textureSize(uScene, 0).y) * 0.20 / radiusPx), 1.0, 5.0);
-      vec2 lens = vUv + ray / axes * (2.10 + 0.42 * smoothstep(0.42, 1.0, water.r));
-      float rim = 1.0 - smoothstep(0.435, 0.64, water.r);
-      vec3 through = sceneAt(clamp(lens, 0.002, 0.998), lensLod + 0.9 * rim);
-      through = mix(through, view, 0.13 + 0.10 * rim);
-      vec3 mirrored = room(vUv + (2.0 * n.z * n.xy / axes) * 0.48, 0.9);
-      // The secondary ray returned by the pane can exceed the water-air critical angle.
-      float returnCos = 2.0 * n.z * n.z - 1.0;
-      float internal = 1.0 - smoothstep(0.61, 0.72, returnCos);
-      float fres = 0.0204 + 0.9796 * pow(1.0 - n.z, 5.0);
-      vec3 drop = mix(through, mirrored, fres + rim * (0.18 + 0.38 * internal));
-      // Broad reflection of the monitor, distinct from the small lamp filament.
-      vec2 panel = (n.xy - vec2(-0.28, -0.07)) / vec2(0.18, 0.085);
-      float panelLight = exp(-dot(panel, panel) * 1.7);
-      drop += panelLight * vec3(0.065, 0.090, 0.14) * (0.55 + uSky.y);
-      drop *= 1.0 - rim * (0.20 + 0.20 * internal);
-      // The narrow focus falls just inside the lower contact line.
-      float arc = exp(-440.0 * pow(water.r - 0.53, 2.0)) * smoothstep(0.045, 0.39, n.y - 0.22 * n.x);
-      vec3 skyLight = sceneAt(vec2(vUv.x, 0.82), 4.5);
-      drop += arc * (skyLight * 1.55 + mirrored * 0.38 + vec3(0.032, 0.039, 0.052));
-      vec2 lampDelta = (n.xy - vec2(-0.24, 0.19)) / vec2(0.066, 0.046);
-      drop += exp(-dot(lampDelta, lampDelta)) * vec3(0.87, 0.75, 0.60);
-      // beads only a few pixels wide read as tiny clear specks, not dark holes
-      float tiny = 1.0 - smoothstep(2.5, 7.0, radiusPx);
-      drop = mix(drop, col * 0.9 + glow * 0.08 + drop * 0.25, tiny * 0.7);
-      col = mix(col, drop, coverage);
-      if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.0, 0.0), coverage);
-    }
+    // Premultiplied lens colour and local lighting from the instanced drops.
+    col = col * (1.0 - water.a) + water.rgb;
+    if (uDebug > 0.5) col = mix(col, vec3(1.0,0.0,0.0), water.a);
 
     // the room itself: window frame and sill, lit from outside
     vec3 backlight = glow * 0.9 + 0.03;
@@ -488,6 +455,12 @@ export function createGlass(canvas, options = {}) {
           // contact shadow: tight under the body, soft around it, longer towards the room
           vec2 sc = vec2((g.x - cx) / (uCatRect.z * 0.38), (g.y - uCatBase - top * 0.08) / (top * 0.3));
           float shadow = smoothstep(1.3, 0.15, length(sc)) * 0.6 + smoothstep(0.55, 0.0, length(sc * vec2(1.0, 1.6))) * 0.3;
+          // the window is behind the cat, so its shadow falls forward, towards the room,
+          // widening and softening as it goes
+          float ahead = max(g.y - uCatBase, 0.0) / top;
+          float spread = uCatRect.z * 0.36 * (1.0 + 0.9 * ahead);
+          float castShadow = smoothstep(spread, spread * 0.35, abs(g.x - cx)) * exp(-ahead * 1.6) * step(uCatBase - top * 0.05, g.y);
+          shadow = max(shadow, castShadow * 0.7);
           sillCol *= 1.0 - clamp(shadow, 0.0, 0.85);
         }
       } else {
@@ -610,7 +583,7 @@ export function createGlass(canvas, options = {}) {
   function target(width, height, kind) {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    const format = floatTargets ? gl.RGBA16F : gl.RGBA8;
+    const format = kind !== "water" && floatTargets ? gl.RGBA16F : gl.RGBA8;
     const levels = kind === "scene" ? 1 + Math.floor(Math.log2(Math.max(width, height))) : 1;
     gl.texStorage2D(gl.TEXTURE_2D, levels, format, width, height);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, kind === "scene" ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
@@ -650,6 +623,22 @@ export function createGlass(canvas, options = {}) {
       img.src = src;
     });
   }
+
+  const dropTextures = [texture2d(), texture2d()];
+  let haveDrops = false;
+  Promise.all(["surface", "light"].map(async (name, index) => {
+    const response = await fetch(new URL(`./assets/drops-${name}.png`, import.meta.url));
+    if (!response.ok) throw new Error(`Drop atlas HTTP ${response.status}`);
+    const bitmap = await createImageBitmap(await response.blob(), {
+      imageOrientation: "flipY", premultiplyAlpha: "none", colorSpaceConversion: "none",
+    });
+    gl.bindTexture(gl.TEXTURE_2D, dropTextures[index]);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 4);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    bitmap.close();
+  })).then(() => { haveDrops = true; }).catch(console.error);
 
   function loadView() {
     const kind = view.aspect < 0.85 ? "tall" : "wide";
@@ -751,7 +740,7 @@ export function createGlass(canvas, options = {}) {
 
   function layoutCat() {
     const portrait = view.aspect < 0.9;
-    layout.catBase = layout.sill + layout.sillTop * 0.55;
+    layout.catBase = layout.sill + layout.sillTop * 0.62;
     if (loaded.catAspect < 1) {
       // sitting: the painting is cropped so its base sits at the bottom edge
       const height = portrait ? 0.24 : 0.36;
@@ -772,9 +761,12 @@ export function createGlass(canvas, options = {}) {
     return loaded.cat && x > cx + w * 0.15 && x < cx + w * 0.85 && y < by && y > by - h * 0.9;
   }
 
+  let glassCssHeight = 1;
+
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * view.quality;
     const rect = canvas.getBoundingClientRect();
+    glassCssHeight = Math.max(1, rect.height);
     const width = Math.max(2, Math.round(rect.width * dpr));
     const height = Math.max(2, Math.round(rect.height * dpr));
     if (width === view.width && height === view.height) return;
@@ -799,7 +791,7 @@ export function createGlass(canvas, options = {}) {
     const portrait = view.aspect < 0.9;
     layout.frame = portrait ? 0.012 : 0.018;
     layout.sill = portrait ? 0.9 : 0.885;
-    layout.sillTop = portrait ? 0.034 : 0.042;
+    layout.sillTop = portrait ? 0.05 : 0.062;
     layoutCat();
     loadView();
     writer.queue.length = 0;
@@ -810,7 +802,7 @@ export function createGlass(canvas, options = {}) {
     for (let i = 0; i < Math.round(64 * view.aspect); i++) {
       const x = layout.frame + random() * (view.aspect - 2 * layout.frame);
       const y = layout.frame + (layout.sill - layout.frame) * random() ** 0.82;
-      const d = addDrop(x, y, 0.00052 + 0.0028 * random() ** 3);
+      const d = addDrop(x, y, (0.52 + 0.94 * random() ** 2) / glassCssHeight);
       if (d) d.age = 1;
     }
     schedule.next = clock + 0.5;
@@ -990,18 +982,24 @@ export function createGlass(canvas, options = {}) {
       }
     }
     // Broad wet patches supply clusters of satellites separated by nearly bare stretches.
-    const patch = noise1((ax + bx) * 9 + (ay + by) * 17);
-    let supply = length * (12 + 100 * patch ** 2) + random();
+    const patch = noise1((ax + bx) * 18 + (ay + by) * 27);
+    let supply = length * (9 + 145 * patch ** 2.6) + random();
     if (swept > 1e-9) supply = Math.max(1, supply);
     while (supply >= 1) {
       supply--;
       const t = random(), side = random() < 0.5 + 0.28 * ny ? 1 : -1;
       const lower = ny * side;
-      const size = (0.065 + 0.47 * random() ** 2.8) * (0.88 + 0.24 * lower);
+      const size = (0.041 + (0.24 + 0.080 * patch) * random() ** 4.1) * (0.88 + 0.24 * lower);
       const r = Math.cbrt((radius * size) ** 3 + swept * 0.85);
       swept = 0;
-      const bank = side * radius * (0.83 + 0.16 * random());
-      addDrop(ax + t * dx + nx * bank, ay + t * dy + ny * bank, r);
+      const bank = side * radius * (0.74 + 0.28 * random() + 0.15 * patch);
+      const x = ax + t * dx + nx * bank, y = ay + t * dy + ny * bank;
+      addDrop(x, y, r);
+      if (r > radius * 0.15 && random() < patch * 0.55) {
+        const offset = r * (1.7 + 2.3 * random());
+        const phi = random() * Math.PI * 2;
+        addDrop(x + offset * Math.cos(phi), y + offset * Math.sin(phi), r * (0.16 + random() * 0.18));
+      }
     }
   }
 
@@ -1059,14 +1057,14 @@ export function createGlass(canvas, options = {}) {
     while (condensationClock > 1) {
       condensationClock -= 1;
       const y = layout.frame + (layout.sill - layout.frame) * random() ** 0.8;
-      addDrop(layout.frame + random() * (view.aspect - 2 * layout.frame), y, 0.00048 + random() * 0.0006);
+      addDrop(layout.frame + random() * (view.aspect - 2 * layout.frame), y, (0.50 + random() * 0.66) / glassCssHeight);
     }
     const deposits = [];
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
       d.age += dt;
       d.alpha = Math.min(1, d.age * 3);
-      d.r = Math.sqrt(d.r * d.r + dt * (0.000000018 + 0.00000040 * d.seed ** 6));
+      d.r = Math.sqrt(d.r * d.r + dt * (0.000000009 + 0.00000016 * d.seed ** 8));
       const critical = baseCritical * (0.96 + 0.40 * d.seed);
       if (d.r <= critical) {
         d.speed = 0;
@@ -1375,17 +1373,27 @@ export function createGlass(canvas, options = {}) {
     const count = Math.min(drops.length, MAX_DROPS);
     for (let i = 0; i < count; i++) {
       const d = drops[i];
-      instanceData.set([d.x, d.y, d.r, d.alpha, d.thread ? Math.max(d.stretch, d.thread * Math.exp(-d.age / 9)) : d.stretch, d.seed, d.drift * d.stretch], i * 7);
+      instanceData.set([d.x, d.y, d.r, d.alpha, d.thread ? Math.max(d.stretch, d.thread * Math.exp(-d.age / 5)) : d.stretch, d.seed, d.drift * d.stretch], i * 7);
     }
-    if (count) {
+    if (count && haveDrops) {
       const w = programs.water;
       gl.useProgram(w.program);
       gl.uniform1f(w.uniforms.uAspect, view.aspect);
+      gl.uniform1f(w.uniforms.uGlassHeight, glassCssHeight);
+      gl.uniform1f(w.uniforms.uRoomAspect, loaded.roomAspect);
+      gl.uniform2f(w.uniforms.uParallax, ...parallax);
+      gl.uniform3f(w.uniforms.uSky, ...skyState());
+      for (const [unit, name, tex] of [[0,"uSurface",dropTextures[0]], [1,"uLight",dropTextures[1]],
+                                       [2,"uScene",view.scene.texture], [3,"uRoom",images.room]]) {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.uniform1i(w.uniforms[name], unit);
+      }
       gl.bindVertexArray(waterVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData, 0, count * 7);
       gl.enable(gl.BLEND);
-      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
       gl.disable(gl.BLEND);
       gl.bindVertexArray(emptyVao);
