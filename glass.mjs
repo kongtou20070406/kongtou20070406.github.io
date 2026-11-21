@@ -205,8 +205,8 @@ export function createGlass(canvas, options = {}) {
   layout(location = 1) in vec4 aDrop;
   layout(location = 2) in vec3 aShape; // stretch, stable seed, drift
   uniform float uAspect, uGlassHeight;
-  out vec2 vAtlas, vGlass;
-  flat out float vFade, vRadius, vStretch;
+  out vec2 vAtlas;
+  flat out float vFade, vStretch;
   void main() {
     bool sliding = aShape.x > 0.12;
     bool micro = aDrop.z * uGlassHeight < 1.5;
@@ -214,53 +214,30 @@ export function createGlass(canvas, options = {}) {
                  micro ? 18.0 + floor(aShape.y * 6.0) : floor(aShape.y * 12.0);
     vAtlas = (vec2(mod(tile, 6.0), 3.0 - floor(tile / 6.0)) + 0.5 + aCorner * 0.5) / vec2(6,4);
     vec2 local = aCorner;
-    vStretch = sliding ? 1.0 + 0.47 * aShape.x : 1.0;
+    vStretch = sliding ? 0.86 + 0.22 * aShape.x : 1.0;
     if (sliding) {
       local.y += 0.34;
       local.y *= vStretch;
       local.x -= aShape.z * max(local.y, 0.0);
     }
-    vec2 pos = aDrop.xy + vec2(local.x, -local.y) * aDrop.z / (sliding ? 0.43 : 0.73);
-    vGlass = vec2(pos.x / uAspect, 1.0 - pos.y);
+    vec2 pos = aDrop.xy + vec2(local.x, -local.y) * min(aDrop.z * 0.94, (uAspect < 0.9 ? 0.018 : 0.014) * 0.69) / (sliding ? 0.43 : 0.73);
+    vec2 vGlass = vec2(pos.x / uAspect, 1.0 - pos.y);
     vFade = aDrop.w;
-    vRadius = aDrop.z;
     gl_Position = vec4(vGlass * 2.0 - 1.0, 0, 1);
   }`;
 
+  // The Blender atlas stores premultiplied slope, cap height and a soft footprint.
+  // Overlapping footprints cross the contact threshold together in the composite.
   const WATER_FRAGMENT = `#version 300 es
   precision highp float;
-  uniform sampler2D uSurface, uLight, uScene, uRoom;
-  uniform float uAspect, uRoomAspect;
-  uniform vec2 uParallax;
-  uniform vec3 uSky;
-  in vec2 vAtlas, vGlass;
-  flat in float vFade, vRadius, vStretch;
+  uniform sampler2D uSurface;
+  in vec2 vAtlas;
+  flat in float vFade, vStretch;
   out vec4 outColor;
-  ${NOISE}
   void main() {
-    vec4 cap = texture(uSurface, vAtlas);
-    vec3 baked = texture(uLight, vAtlas).rgb;
-    vec2 xy = (cap.rg - 0.5) * 2.0 / max(cap.a, 0.01);
-    xy.y /= vStretch;
-    vec3 n = vec3(xy, sqrt(max(0.01, 1.0 - dot(xy, xy))));
-    float height = cap.b / max(cap.a, 0.01);
-    // Let the mist show through the very thinnest part of the contact.
-    float coverAlpha = cap.a * vFade * mix(0.72, 1.0, smoothstep(0.0, 0.15, height));
-    vec2 axes = vec2(1.0/uAspect, 1);
-    vec2 ray = refract(vec3(0,0,-1), n, 1.0/1.333).xy;
-    vec2 lens = vGlass + ray * axes * (1.65 + 0.22 * height);
-    float lod = clamp(log2(0.031 / vRadius), 1.0, 5.5);
-    vec3 through = textureLod(uScene, clamp(lens,0.001,0.999), lod).rgb * 2.0;
-    vec2 mirror = vGlass + axes * n.xy * n.z * 0.95;
-    vec2 r = cover(vec2(1.0-mirror.x,mirror.y), uAspect, uRoomAspect, 1.08, -uParallax*0.02);
-    vec3 indoor = textureLod(uRoom,r,1.5).rgb;
-    float fresnel = 0.0204 + 0.9796 * pow(1.0-n.z,5.0);
-    vec3 drop = mix(through,indoor,fresnel);
-    // The outdoor plate is already display-referred. Combine fixed radiance
-    // in approximately linear light; the light plate includes receiver caustics.
-    vec3 radiance = baked*2.25 * (0.85 + 0.20*uSky.y - 0.24*uSky.x);
-    vec3 wet = sqrt(drop*drop + radiance);
-    outColor = vec4(wet*coverAlpha + radiance*(1.0-cap.a)*vFade, coverAlpha);
+    vec4 field = texture(uSurface, vAtlas);
+    field.g = (field.g - 0.5 * field.a) / vStretch + 0.5 * field.a;
+    outColor = field * vFade;
   }`;
 
   const COMPOSITE = `#version 300 es
@@ -405,9 +382,31 @@ export function createGlass(canvas, options = {}) {
       }
     }
 
-    // Premultiplied lens colour and local lighting from the instanced drops.
-    col = col * (1.0 - water.a) + water.rgb;
-    if (uDebug > 0.5) col = mix(col, vec3(1.0,0.0,0.0), water.a);
+    // water drops: resolve the shared contact line before tracing the outside view.
+    float feather = clamp(fwidth(water.a) * 0.48, 0.025, 0.34);
+    float wet = smoothstep(0.40 - feather, 0.40 + feather, water.a);
+    if (wet > 0.0) {
+      vec3 cap = water.rgb / max(water.a, 0.01);
+      vec2 slope = (cap.rg - 0.5) * 2.0;
+      vec2 axis = vec2(vUv.x, mix(vUv.y, 0.50, 0.42));
+      vec2 lens = axis - slope * vec2(1.0 / aspect, 1.0) * mix(0.29, 0.15, cap.b);
+      // The roofline bows toward the contact as the viewing angle changes.
+      lens.y += 0.085 * dot(slope, slope);
+      vec3 through = sceneAt(lens, 0.0) * 1.14;
+      float rim = 1.0 - smoothstep(0.03, 0.22, cap.b);
+      vec2 glint = (slope - vec2(-0.28, 0.55)) / vec2(0.39, 0.25);
+      float shine = exp(-dot(glint, glint));
+      vec3 skylight = sceneAt(vec2(vUv.x, 0.76), 4.0);
+      vec3 source = vec3(0.22, 0.24, 0.27) + skylight * 0.40;
+      float flank = smoothstep(0.12, 0.95, dot(slope, vec2(0.28, -0.96)));
+      float grazing = flank * smoothstep(0.18, 0.76, 1.0 - cap.b);
+      float shoulder = smoothstep(0.23, 0.86, length(slope)) * (1.0 - rim);
+      vec3 drop = mix(through, source, 0.38 * grazing + 0.16 * shoulder);
+      drop *= 1.0 - rim * (0.42 - 0.14 * flank);
+      drop += source * (0.70 * shine + 0.30 * sqrt(shine));
+      col = mix(col, drop, wet);
+    }
+    if (uDebug > 0.5) col = mix(col, vec3(1.0,0.0,0.0), wet);
 
     // the room itself: window frame and sill, lit from outside
     vec3 backlight = glow * 0.9 + 0.03;
@@ -628,21 +627,22 @@ export function createGlass(canvas, options = {}) {
     });
   }
 
-  const dropTextures = [texture2d(), texture2d()];
+  const dropTexture = texture2d();
   let haveDrops = false;
-  Promise.all(["surface", "light"].map(async (name, index) => {
-    const response = await fetch(new URL(`./assets/drops-${name}.png`, import.meta.url));
+  (async () => {
+    const response = await fetch(new URL("./assets/drops-lens.png", import.meta.url));
     if (!response.ok) throw new Error(`Drop atlas HTTP ${response.status}`);
     const bitmap = await createImageBitmap(await response.blob(), {
       imageOrientation: "flipY", premultiplyAlpha: "none", colorSpaceConversion: "none",
     });
-    gl.bindTexture(gl.TEXTURE_2D, dropTextures[index]);
+    gl.bindTexture(gl.TEXTURE_2D, dropTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
     gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     bitmap.close();
-  })).then(() => { haveDrops = true; }).catch(console.error);
+    haveDrops = true;
+  })().catch(console.error);
 
   function loadView() {
     const kind = view.aspect < 0.85 ? "tall" : "wide";
@@ -782,7 +782,7 @@ export function createGlass(canvas, options = {}) {
     release(view.scene);
     view.scene = target(Math.max(2, Math.round(width * 0.5)), Math.max(2, Math.round(height * 0.5)), "scene");
     release(view.water);
-    view.water = target(Math.max(2, Math.round(width * 0.75)), Math.max(2, Math.round(height * 0.75)), "water");
+    view.water = target(width, height, "water");
     const fogWidth = Math.min(1100, Math.round(width / 2));
     const fogHeight = Math.max(2, Math.round((fogWidth * height) / width));
     for (let i = 0; i < 2; i++) {
@@ -1407,15 +1407,9 @@ export function createGlass(canvas, options = {}) {
       gl.useProgram(w.program);
       gl.uniform1f(w.uniforms.uAspect, view.aspect);
       gl.uniform1f(w.uniforms.uGlassHeight, glassCssHeight);
-      gl.uniform1f(w.uniforms.uRoomAspect, loaded.roomAspect);
-      gl.uniform2f(w.uniforms.uParallax, ...parallax);
-      gl.uniform3f(w.uniforms.uSky, ...skyState());
-      for (const [unit, name, tex] of [[0,"uSurface",dropTextures[0]], [1,"uLight",dropTextures[1]],
-                                       [2,"uScene",view.scene.texture], [3,"uRoom",images.room]]) {
-        gl.activeTexture(gl.TEXTURE0 + unit);
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.uniform1i(w.uniforms[name], unit);
-      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, dropTexture);
+      gl.uniform1i(w.uniforms.uSurface, 0);
       gl.bindVertexArray(waterVao);
       gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuffer);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData, 0, count * 7);
