@@ -875,7 +875,7 @@ export function createGlass(canvas, options = {}) {
     const lineWidth = wordWidth + (withParens ? 0.66 : 0);
     const unit = (Math.min(view.aspect * (portrait ? 0.76 : 0.5), 1.0) / lineWidth) * (0.93 + random() * 0.1);
     const slant = 0.04 + jitter(0.12);
-    const radius = Math.min(0.013, Math.max(0.0055, unit * 0.14));
+    const radius = Math.min(0.0095, Math.max(0.004, unit * 0.1));
     const room = Math.max(0, view.aspect * (portrait ? 0.88 : 0.8) - lineWidth * unit);
     const left = view.aspect * (portrait ? 0.06 : 0.1) + room * (0.3 + random() * 0.4);
     const baseline = (portrait ? 0.38 : 0.42) + unit * 0.5 + jitter(0.045);
@@ -968,7 +968,7 @@ export function createGlass(canvas, options = {}) {
   const random = rng(DEBUG_SHOT ? 0x5bd1e995 : Date.now() >>> 0);
 
   function fingerRadius() {
-    return view.aspect < 0.9 ? 0.018 : 0.014;
+    return view.aspect < 0.9 ? 0.013 : 0.01;
   }
 
   function wipe(ax, ay, bx, by, radius, strength, wet) {
@@ -1194,7 +1194,9 @@ export function createGlass(canvas, options = {}) {
     canvas.setPointerCapture(event.pointerId);
     Object.assign(pointer, { x, y, down: true, last: [x, y], moved: 0, at: clock });
     lastTouch = clock;
-    wipe(x, y, x + 0.0005, y, fingerRadius(), 1, true);
+    // a touch might be the start of a scroll: wait until the finger moves sideways before wiping
+    pointer.touch = event.pointerType === "touch";
+    if (!pointer.touch) wipe(x, y, x + 0.0005, y, fingerRadius(), 1, true);
     clearTimeout(pointer.pressTimer);
     pointer.pressTimer = setTimeout(() => {
       if (pointer.down && pointer.moved < 0.012) breathHeld = true;
@@ -1211,7 +1213,7 @@ export function createGlass(canvas, options = {}) {
     for (const e of events) {
       const [cx, cy] = toGlass(e);
       pointer.moved += Math.hypot(cx - pointer.last[0], cy - pointer.last[1]);
-      if (!breathHeld) wipe(pointer.last[0], pointer.last[1], cx, Math.min(cy, layout.sill), fingerRadius(), 1, true);
+      if (!breathHeld && (!pointer.touch || pointer.moved > 0.012)) wipe(pointer.last[0], pointer.last[1], cx, Math.min(cy, layout.sill), fingerRadius(), 1, true);
       pointer.last = [cx, cy];
     }
     lastTouch = clock;
